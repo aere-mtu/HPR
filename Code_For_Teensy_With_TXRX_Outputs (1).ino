@@ -1,6 +1,18 @@
 #include <Adafruit_LSM6DSOX.h>  //imports the library needed for the sensor
 //#include <SoftwareSerial.h>     //imports the library needed for communication with 
 
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_ADXL375.h>
+
+// --- ADXL375 ---
+Adafruit_ADXL375 adxl(12345); // default I2C ID
+
+// --- ICM-20948 ---
+#define ICM_ADDR 0x68
+struct ICMData { int16_t ax, ay, az; int16_t gx, gy, gz; };
+ICMData icm;
+
 /****************************
          THRESHOLDS
 *****************************/
@@ -46,6 +58,18 @@ Adafruit_LSM6DSOX sox; //sets up the sensor so we can get readings from it
 this funcion will run once and is the main body of code we will be using
 */
 void setup(void){
+
+Wire.begin();
+
+// Initialize ADXL375
+if(!initADXL375()) while(1);
+
+// Initialize ICM-20948
+initICM20948();
+
+Serial.println("All sensors initialized.");
+
+         
   //sets the pins for the nozzels to be outputs
   pinMode(nozzels_1_3,OUTPUT); 
   pinMode(nozzels_2_4,OUTPUT);
@@ -126,7 +150,17 @@ void rocketStatus() {
   if(millis()-launchTime>=appogeTime){ //if time after launch is greater than appo time
     stop();
   }
+float ax375, ay375, az375;
+readADXL375(ax375, ay375, az375);
+
+readICM20948(icm);
+
+Serial.printf("ADXL375: X=%.2f, Y=%.2f, Z=%.2f\n", ax375, ay375, az375);
+Serial.printf("ICM20948: AX=%d, AY=%d, AZ=%d | GX=%d, GY=%d, GZ=%d\n",
+              icm.ax, icm.ay, icm.az, icm.gx, icm.gy, icm.gz);
+
   //@TODO: ADD MORE TEST CASES STILL
+
 }
 
 /*
@@ -137,6 +171,55 @@ void stop(){
   while(true){}
 }
 
+bool initADXL375() {
+  if (!adxl.begin()) {
+    Serial.println("ADXL375 not found!");
+    return false;
+  }
+  adxl.printSensorDetails();
+  return true;
+}
+
+void readADXL375(float &x, float &y, float &z) {
+  sensors_event_t event;
+  adxl.getEvent(&event);
+  x = event.acceleration.x;
+  y = event.acceleration.y;
+  z = event.acceleration.z;
+}
+
+void writeICMRegister(uint8_t reg, uint8_t value){
+  Wire.beginTransmission(ICM_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  Wire.endTransmission();
+}
+
+void readICMRegisters(uint8_t reg, uint8_t count, uint8_t* dest){
+  Wire.beginTransmission(ICM_ADDR);
+  Wire.write(reg);
+  Wire.endTransmission(false);
+  Wire.requestFrom(ICM_ADDR, count);
+  for(uint8_t i=0;i<count;i++){
+    dest[i] = Wire.read();
+  }
+}
+
+void initICM20948() {
+  writeICMRegister(0x06, 0x01); // wake sensor (PWR_MGMT_1)
+  delay(100);
+}
+
+void readICM20948(ICMData &d){
+  uint8_t buf[14];
+  readICMRegisters(0x2D,14,buf); // ACCEL_XOUT_H
+  d.ax = (buf[0]<<8)|buf[1];
+  d.ay = (buf[2]<<8)|buf[3];
+  d.az = (buf[4]<<8)|buf[5];
+  d.gx = (buf[8]<<8)|buf[9];
+  d.gy = (buf[10]<<8)|buf[11];
+  d.gz = (buf[12]<<8)|buf[13];
+}
 
 
 /*
