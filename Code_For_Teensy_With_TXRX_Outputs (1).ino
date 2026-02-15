@@ -53,6 +53,24 @@ bool hasLaunched = false;
 
 Adafruit_LSM6DSOX sox; //sets up the sensor so we can get readings from it
 
+// ---- ACCEL STUCK DETECTION ----
+float lastAx = 0, lastAy = 0, lastAz = 0;
+unsigned long accelLastChangeTime = 0;
+
+const float accelMinDelta = 0.5;        // m/s^2 minimum change considered real
+const unsigned long accelTimeout = 300; // ms before declaring stuck
+
+bool accelInitialized = false;
+
+// ---- GYRO STUCK DETECTION ----
+float lastGyroX = 0;
+unsigned long gyroLastChangeTime = 0;
+
+const float gyroMinDelta = 0.5;      // deg/sec
+const unsigned long gyroTimeout = 250; // ms
+
+bool gyroInitialized = false;
+
 
 /*
 this funcion will run once and is the main body of code we will be using
@@ -152,7 +170,6 @@ void rocketStatus() {
   }
 float ax375, ay375, az375;
 readADXL375(ax375, ay375, az375);
-
 readICM20948(icm);
 
 Serial.printf("ADXL375: X=%.2f, Y=%.2f, Z=%.2f\n", ax375, ay375, az375);
@@ -160,6 +177,76 @@ Serial.printf("ICM20948: AX=%d, AY=%d, AZ=%d | GX=%d, GY=%d, GZ=%d\n",
               icm.ax, icm.ay, icm.az, icm.gx, icm.gy, icm.gz);
 
   //@TODO: ADD MORE TEST CASES STILL
+
+// TEST CASE 1: ADXL out of range
+if ( ax375 < -200 || ax375 > 200 || az375 < -200 || az375 > 200 || ay375 < -200 || ay375 > 200){
+         Serial.printf("ADXL bounds out of range!");
+}
+
+// TEST CASE 2: ICM out of range
+
+if(abs(icm.gx) > 1000){
+    Serial.printf("ADXL is experiencing extreme spin");
+}
+
+// TEST CASE  3: ADXL stuck detection
+
+// First time initialization
+if(!accelInitialized){
+    lastAx = ax375;
+    lastAy = ay375;
+    lastAz = az375;
+    accelLastChangeTime = millis();
+    accelInitialized = true;
+}
+
+// Check if acceleration changed meaningfully
+bool accelChanged =
+    (abs(ax375 - lastAx) > accelMinDelta) ||
+    (abs(ay375 - lastAy) > accelMinDelta) ||
+    (abs(az375 - lastAz) > accelMinDelta);
+
+// If changed, reset timer
+if(accelChanged){
+    accelLastChangeTime = millis();
+}
+
+// Update stored values
+lastAx = ax375;
+lastAy = ay375;
+lastAz = az375;
+
+// Only check for stuck during powered ascent
+if(hasLaunched && millis() - launchTime < appogeTime){
+
+    if(millis() - accelLastChangeTime > accelTimeout){
+        Serial.println("ACCELEROMETER STUCK DETECTED!");
+    }
+}
+
+// TEST CASE 4: Gyro stuck detection
+
+if(!gyroInitialized){
+    lastGyroX = gyro.gyro.x;
+    gyroLastChangeTime = millis();
+    gyroInitialized = true;
+}
+
+if(abs(gyro.gyro.x - lastGyroX) > gyroMinDelta){
+    gyroLastChangeTime = millis();
+}
+
+lastGyroX = gyro.gyro.x;
+
+if(hasLaunched && millis() - launchTime < appogeTime){
+
+    if(millis() - gyroLastChangeTime > gyroTimeout){
+        Serial.println("GYROSCOPE STUCK DETECTED!");
+        stop();
+    }
+}
+
+
 
 }
 
