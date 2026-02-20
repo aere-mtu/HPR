@@ -26,7 +26,14 @@ const int appogeTime = 2400000; // takes 24.1 secs to reach appoge
 /****************************
          VALUES
 *****************************/
-
+/****************************
+         PRESSURE SENSOR
+*****************************/
+#define PRESSURE_PIN 19
+const float DIVIDER_RATIO = 1.5; 
+const float V_REF = 3.3; 
+const int ADC_RES = 1023; 
+float currentPressure = 0.0;
 long launchTime;//measured in millisecs
 long curTime; //measured in millisecs
 
