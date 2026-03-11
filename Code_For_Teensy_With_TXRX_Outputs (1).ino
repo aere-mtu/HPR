@@ -1,12 +1,12 @@
-#include <Adafruit_LSM6DSOX.h>  //imports the library needed for the sensor
-//#include <SoftwareSerial.h>     //imports the library needed for communication with 
+//#include <Adafruit_LSM6DSOX.h>  //imports the library needed for the sensor
 
 #include <Wire.h>
-#include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL375.h>
+#include <Adafruit_Sensor.h>
 
 // --- ADXL375 ---
-Adafruit_ADXL375 adxl(12345); // default I2C ID
+//Adafruit_ADXL375 adxl(12345); // default I2C ID
+Adafruit_ADXL375 adxl = Adafruit_ADXL375(12345);
 
 // --- ICM-20948 ---
 #define ICM_ADDR 0x68
@@ -58,7 +58,7 @@ bool hasLaunched = false;
 #define LSM_MISO  36    //do pin
 #define LSM_MOSI  38    //sda pin
 
-Adafruit_LSM6DSOX sox; //sets up the sensor so we can get readings from it
+//Adafruit_LSM6DSOX sox; //sets up the sensor so we can get readings from it
 
 // ---- ACCEL STUCK DETECTION ----
 float lastAx = 0, lastAy = 0, lastAz = 0;
@@ -80,25 +80,15 @@ bool gyroInitialized = false;
 
 
 /*
-this funcion will run once and is the main body of code we will be using
+this function will run once and is the main body of code we will be using
 */
 void setup(void){
 
-Wire.begin();
 
-// Initialize ADXL375
-if(!initADXL375()) while(1);
-
-// Initialize ICM-20948
-initICM20948();
-
-Serial.println("All sensors initialized.");
-
-         
   //sets the pins for the nozzels to be outputs
   pinMode(nozzels_1_3,OUTPUT); 
   pinMode(nozzels_2_4,OUTPUT);
-  
+
   //provides power to the sensor
   pinMode(14,OUTPUT);
   digitalWrite(14,HIGH);
@@ -110,13 +100,28 @@ Serial.println("All sensors initialized.");
   Serial6.begin(9600);
 
   //sets up the sensor
-  sox.begin_SPI(LSM_CS, LSM_SCK, LSM_MISO, LSM_MOSI);
-  sox.setAccelDataRate(LSM6DS_RATE_208_HZ);
+  //sox.begin_SPI(LSM_CS, LSM_SCK, LSM_MISO, LSM_MOSI);
+  //sox.setAccelDataRate(LSM6DS_RATE_208_HZ);
 
+  Serial.println("Yo wassup world");
+  Wire.begin();
 
+  // Init both ADXL375 and ICM20948, if one of them does not work program loops
+    bool adxlOK = initADXL375();
+    bool icmOK  = initICM20948();
+
+    if(!adxlOK || !icmOK){
+      Serial.println("Sensor initialization failed!");
+      while(1){}
+    }
+
+  // Initialize ICM-20948
+  Serial.println("All sensors initialized.");
 
   //enters loop until the takeoff threshold is achived
-  while(!hasLaunched && sox.getEvent(&accel, &gyro, &temp)){
+  while(!hasLaunched){ // && sox.getEvent(&accel, &gyro, &temp
+    adxl.getEvent(&accel);
+    
     vertAccel = accel.acceleration.x;
 
     Serial6.printf("x: %.2lf \n", vertAccel);
@@ -171,7 +176,7 @@ void spin(double targetVelocity) {
 Checks to make sure the rocket flight is nominal and gets curent data
 */
 void rocketStatus() {
-  sox.getEvent(&accel, &gyro, &temp);
+  //sox.getEvent(&accel, &gyro, &temp);
   if(millis()-launchTime>=appogeTime){ //if time after launch is greater than appo time
     stop();
   }
@@ -270,6 +275,7 @@ bool initADXL375() {
     Serial.println("ADXL375 not found!");
     return false;
   }
+  Serial.println("ADXL found!");
   adxl.printSensorDetails();
   return true;
 }
@@ -299,9 +305,25 @@ void readICMRegisters(uint8_t reg, uint8_t count, uint8_t* dest){
   }
 }
 
-void initICM20948() {
+bool initICM20948() {
+
+  uint8_t whoami;
+
+  readICMRegisters(0x00, 1, &whoami);
+
+  //Serial.print("ICM WHO_AM_I: 0x");
+  //Serial.println(whoami, HEX);
+
+  if(whoami == 0xEA){
+    Serial.println("ICM20948 found!");
+  } else {
+    Serial.println("ICM20948 not found!");
+    return false;
+  }
+
   writeICMRegister(0x06, 0x01); // wake sensor (PWR_MGMT_1)
   delay(100);
+  return true;
 }
 
 void readICM20948(ICMData &d){
