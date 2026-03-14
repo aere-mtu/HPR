@@ -1,8 +1,6 @@
 //#include <Adafruit_LSM6DSOX.h>  //imports the library needed for the sensor
 
 #include <Wire.h>
-#include <Adafruit_ADXL375.h>
-#include <Adafruit_Sensor.h>
 
 // --- ADXL375 ---
 //Adafruit_ADXL375 adxl(12345); // default I2C ID
@@ -48,9 +46,6 @@ bool hasLaunched = false;
          OTHER
 *****************************/
 
-#define nozzels_1_3 18 //sets nozzels 1 & 3 to be controlled by pin 18
-#define nozzels_2_4 16 //sets nozzels 2 & 4 to be controlled by pin 16
-
 
 //Defines pins for the LSM6DSOX sensor
 #define LSM_CS    34    //cs pin
@@ -84,11 +79,6 @@ this function will run once and is the main body of code we will be using
 */
 void setup(void){
 
-
-  //sets the pins for the nozzels to be outputs
-  pinMode(nozzels_1_3,OUTPUT); 
-  pinMode(nozzels_2_4,OUTPUT);
-
   //provides power to the sensor
   pinMode(14,OUTPUT);
   digitalWrite(14,HIGH);
@@ -118,7 +108,7 @@ void setup(void){
   // Initialize ICM-20948
   Serial.println("All sensors initialized.");
 
-  //enters loop until the takeoff threshold is achived
+  // Enters loop until the takeoff threshold is achived
   while(!hasLaunched){ // && sox.getEvent(&accel, &gyro, &temp
     adxl.getEvent(&accel);
     
@@ -138,40 +128,14 @@ void setup(void){
 
    launchTime = millis(); //begins counting millisecs after launch
 
-  spin(0);//stops the rocket
-  delay(3000);//waits a second
-  spin(5);
-  delay(3000);//waits a second
-  spin(-5);
-  //@TODO add more 
-}
 
-
-/*
-this function takes in a double target velocity and will open and close the nozzels to make the rocket match the given rotational velocity
-*/
-void spin(double targetVelocity) {
-  
-  while(gyro.gyro.x!=targetVelocity){ //while the spin isnt equal to target spin
-    Serial6.printf("Cur Vel: %f \t Tar Vel: %lf\n",gyro.gyro.x,targetVelocity);
-
-    rocketStatus(); //make sure the rocket is safe & get updated data
-        if(gyro.gyro.x>targetVelocity){//if x is rotating faster than our target velocity
-      digitalWrite(nozzels_2_4, HIGH);//open 2&4
-    }else{
-      digitalWrite(nozzels_2_4, LOW);//close 2&4
-    }
-    if(gyro.gyro.x<targetVelocity){//if x is rotating less than our target velocity
-      digitalWrite(nozzels_1_3, HIGH);//open 1&3
-    }else{
-      digitalWrite(nozzels_1_3, LOW);//close 1&3
-    }
+  while(true){
+    rocketStatus();
+    delay(3000);
   }
-  //value is matched close all
-  Serial6.printf("Target Rotation of %lf Reached \n",targetVelocity);
-  digitalWrite(nozzels_1_3, LOW);//close 1&3
-  digitalWrite(nozzels_2_4, LOW);//close 2&4
 }
+
+
 /*
 Checks to make sure the rocket flight is nominal and gets curent data
 */
