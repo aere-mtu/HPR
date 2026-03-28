@@ -1,6 +1,8 @@
 //#include <Adafruit_LSM6DSOX.h>  //imports the library needed for the sensor
 
 #include <Wire.h>
+#include <Arduino.h>
+#include <SD.h>
 
 // --- ADXL375 ---
 //Adafruit_ADXL375 adxl(12345); // default I2C ID
@@ -10,6 +12,11 @@ Adafruit_ADXL375 adxl = Adafruit_ADXL375(12345);
 #define ICM_ADDR 0x68
 struct ICMData { int16_t ax, ay, az; int16_t gx, gy, gz; };
 ICMData icm;
+
+// --- SD-Card ---
+File flightData;
+const char filename[] = "dataLog.txt";
+char buffer[64];
 
 /****************************
          THRESHOLDS
@@ -99,8 +106,9 @@ void setup(void){
   // Init both ADXL375 and ICM20948, if one of them does not work program loops
     bool adxlOK = initADXL375();
     bool icmOK  = initICM20948();
+    bool sdOK   = initSDCard();
 
-    if(!adxlOK || !icmOK){
+    if(!adxlOK || !icmOK || !sdOK){
       Serial.println("Sensor initialization failed!");
       while(1){}
     }
@@ -126,8 +134,10 @@ void setup(void){
   Serial6.println("LAUNCHED");
   Serial.println("LAUNCHED");
 
-   launchTime = millis(); //begins counting millisecs after launch
+  launchTime = millis(); //begins counting millisecs after launch
 
+  // Opens SD card for writing
+  flightData = SD.open(filename, FILE_WRITE);
 
   while(true){
     rocketStatus();
@@ -144,85 +154,91 @@ void rocketStatus() {
   if(millis()-launchTime>=appogeTime){ //if time after launch is greater than appo time
     stop();
   }
-float ax375, ay375, az375;
-readADXL375(ax375, ay375, az375);
-readICM20948(icm);
+  float ax375, ay375, az375;
+  readADXL375(ax375, ay375, az375);
+  readICM20948(icm);
 
-Serial.printf("ADXL375: X=%.2f, Y=%.2f, Z=%.2f\n", ax375, ay375, az375);
-Serial.printf("ICM20948: AX=%d, AY=%d, AZ=%d | GX=%d, GY=%d, GZ=%d\n",
+  Serial.printf("ADXL375: X=%.2f, Y=%.2f, Z=%.2f\n", ax375, ay375, az375);
+  Serial.printf("ICM20948: AX=%d, AY=%d, AZ=%d | GX=%d, GY=%d, GZ=%d\n",
               icm.ax, icm.ay, icm.az, icm.gx, icm.gy, icm.gz);
 
-  //@TODO: ADD MORE TEST CASES STILL
+  flightData = SD.open(filename, FILE_WRITE);
+  if (flightData)
+  {
+    sprintf(buffer, "%d,%d,%d,%d,%d,%d,%d", ax375, ay375, az375, icm.gx, icm.gy, icm.gz, launchTime);
+    Serial.println(buffer);
+    forzaFlightData.println(buffer);
+    delay(100);
+    memset(buffer, 0, sizeof(buffer));
+  }
 
-// TEST CASE 1: ADXL out of range
-if ( ax375 < -200 || ax375 > 200 || az375 < -200 || az375 > 200 || ay375 < -200 || ay375 > 200){
-         Serial.printf("ADXL bounds out of range!");
-}
+  
+  // TEST CASE 1: ADXL out of range
+  if ( ax375 < -200 || ax375 > 200 || az375 < -200 || az375 > 200 || ay375 < -200 || ay375 > 200){
+          Serial.printf("ADXL bounds out of range!");
+  }
 
-// TEST CASE 2: ICM out of range
+  // TEST CASE 2: ICM out of range
+  if(abs(icm.gx) > 1000){
+      Serial.printf("ADXL is experiencing extreme spin");
+  }
 
-if(abs(icm.gx) > 1000){
-    Serial.printf("ADXL is experiencing extreme spin");
-}
+  // TEST CASE  3: ADXL stuck detection
 
-// TEST CASE  3: ADXL stuck detection
+  // First time initialization
+  if(!accelInitialized){
+      lastAx = ax375;
+      lastAy = ay375;
+      lastAz = az375;
+      accelLastChangeTime = millis();
+      accelInitialized = true;
+  }
 
-// First time initialization
-if(!accelInitialized){
-    lastAx = ax375;
-    lastAy = ay375;
-    lastAz = az375;
-    accelLastChangeTime = millis();
-    accelInitialized = true;
-}
+  // Check if acceleration changed meaningfully
+  bool accelChanged =
+      (abs(ax375 - lastAx) > accelMinDelta) ||
+      (abs(ay375 - lastAy) > accelMinDelta) ||
+      (abs(az375 - lastAz) > accelMinDelta);
 
-// Check if acceleration changed meaningfully
-bool accelChanged =
-    (abs(ax375 - lastAx) > accelMinDelta) ||
-    (abs(ay375 - lastAy) > accelMinDelta) ||
-    (abs(az375 - lastAz) > accelMinDelta);
+  // If changed, reset timer
+  if(accelChanged){
+      accelLastChangeTime = millis();
+  }
 
-// If changed, reset timer
-if(accelChanged){
-    accelLastChangeTime = millis();
-}
+  // Update stored values
+  lastAx = ax375;
+  lastAy = ay375;
+  lastAz = az375;
 
-// Update stored values
-lastAx = ax375;
-lastAy = ay375;
-lastAz = az375;
+  // Only check for stuck during powered ascent
+  if(hasLaunched && millis() - launchTime < appogeTime){
 
-// Only check for stuck during powered ascent
-if(hasLaunched && millis() - launchTime < appogeTime){
+      if(millis() - accelLastChangeTime > accelTimeout){
+          Serial.println("ACCELEROMETER STUCK DETECTED!");
+      }
+  }
 
-    if(millis() - accelLastChangeTime > accelTimeout){
-        Serial.println("ACCELEROMETER STUCK DETECTED!");
-    }
-}
+  // TEST CASE 4: Gyro stuck detection
 
-// TEST CASE 4: Gyro stuck detection
+  if(!gyroInitialized){
+      lastGyroX = gyro.gyro.x;
+      gyroLastChangeTime = millis();
+      gyroInitialized = true;
+  }
 
-if(!gyroInitialized){
-    lastGyroX = gyro.gyro.x;
-    gyroLastChangeTime = millis();
-    gyroInitialized = true;
-}
+  if(abs(gyro.gyro.x - lastGyroX) > gyroMinDelta){
+      gyroLastChangeTime = millis();
+  }
 
-if(abs(gyro.gyro.x - lastGyroX) > gyroMinDelta){
-    gyroLastChangeTime = millis();
-}
+  lastGyroX = gyro.gyro.x;
 
-lastGyroX = gyro.gyro.x;
+  if(hasLaunched && millis() - launchTime < appogeTime){
 
-if(hasLaunched && millis() - launchTime < appogeTime){
-
-    if(millis() - gyroLastChangeTime > gyroTimeout){
-        Serial.println("GYROSCOPE STUCK DETECTED!");
-        stop();
-    }
-}
-
-
+      if(millis() - gyroLastChangeTime > gyroTimeout){
+          Serial.println("GYROSCOPE STUCK DETECTED!");
+          stop();
+      }
+  }
 
 }
 
@@ -232,6 +248,18 @@ Outputs an erorr mesage and enters an endless loop
 void stop(){
   Serial6.println("\nROCKET PARAMETERS OUT OF BOUNDS, SPIN TERMINATED");
   while(true){}
+}
+
+bool initSDCard() {
+  SD.begin(BUILTIN_SDCARD);
+
+  if (!SD.begin(BUILTIN_SDCARD)) {
+    Serial.print("The SD card failed to initalize");
+    return false;
+  }
+
+  Serial.println("The SD card has been initalized.");
+  return true;
 }
 
 bool initADXL375() {
